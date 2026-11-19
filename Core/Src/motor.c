@@ -65,11 +65,14 @@ static pi_ctrl_t paper_spd_pi = { .kp = 1.2f, .ki = 0.02f, .integral = 0.0f,
 /* ============================================================
  * PWM 输出（move / paper）
  * ============================================================ */
+static int32_t move_pwm_current = 0; /* [新增] 当前 move PWM 输出（闭环标定 software_max 判撞限位用） */
+
 void set_move_pwm_duty(int32_t duty) {
 	if (duty > PWM_MAX)
 		duty = PWM_MAX;
 	if (duty < -PWM_MAX)
 		duty = -PWM_MAX;
+	move_pwm_current = duty; /* [新增] 记录当前 PWM */
 
 	if (duty == 0) {
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_MAX);
@@ -338,8 +341,9 @@ void Move_Control_Task(void) {
 	TIM2_UpdateEncoderExtension();
 	Move_Encoder_Speed_Update();
 
-	/* [新增] 标定期间跳过闭环（标定直接控制 PWM） */
-	if (calib_type != CALIB_NONE)
+	/* [修改] 标定期间跳过闭环（标定直接控制 PWM）；
+	   CALIB_SW_MAX 例外：软件限位标定用闭环驱动（位置环推电机撞限位，靠 PWM 阈值判定） */
+	if (calib_type != CALIB_NONE && calib_type != CALIB_SW_MAX)
 		return;
 
 	/* [修改] 打孔时（开关开启）：停 PWM + 闭环断开（不读 CNT 做闭环），
@@ -371,10 +375,13 @@ void Move_Control_Task(void) {
 	/* [修改] 软件限位：目标钳位到 [-software_max, 0]（工作区在 home 负方向，防止超行程） */
 	int32_t target = move_target_position;
 	int32_t sw_max_pulses = Notes_GetSwMaxPulses(); /* [修复] 用整数缓存，避免每 1ms 软浮点 roundf */
-	if (target < -sw_max_pulses)
-		target = -sw_max_pulses;
-	if (target > 0)
-		target = 0;
+	/* [修改] 软件限位标定时不钳位 target（目标故意设在限位外，让闭环推电机撞机械限位） */
+	if (calib_type != CALIB_SW_MAX) {
+		if (target < -sw_max_pulses)
+			target = -sw_max_pulses;
+		if (target > 0)
+			target = 0;
+	}
 	int32_t err = target - pos;
 
 	/* [修复] 到位容忍至少 1 脉冲：move_dead_band=0 要求 err 精确=0，叠加死区补偿（最小 PWM=move_base）
@@ -610,8 +617,10 @@ void Punch_Control_Task(void) {
 							save_config_request = 1; /* 请求主循环写 Flash（掉电保存清零） */
 							/* [修复] 离线执行中抑制阈值回零，避免中途把主轴拉回原点打断文件；
 							   文件结束的 M80 会统一回零 */
-							if (!FileIO_IsRunning())
+							if (!FileIO_IsRunning()) {
 								homing_request = 1; /* 请求回零（动作空闲时执行） */
+								homing_no_recenter = 1; /* [新增] 打孔中途阈值回零：完成后不回中，回待打位置继续打 */
+							}
 						}
 						punch_restore_move_counter(); /* [新增] 恢复打孔前 counter */
 						Punch_Stop();
@@ -706,6 +715,10 @@ void Calibration_Start(uint8_t type) {
 	case CALIB_SW_MAX:
 		calib_max_pos = read_move_encoder_counter();
 		calib_last_pos = calib_max_pos;
+		/* [修改] 闭环标定：位置环目标设在限位方向更远处（-100000 脉冲，超出任何合理行程），
+		   让闭环推电机往机械限位走；撞限位时闭环 PWM 飙高由 Calib_SwMax 判超阈值 */
+		move_target_position = calib_max_pos - 100000;
+		move_busy = 1;
 		break;
 	default:
 		calib_type = CALIB_NONE;
@@ -816,57 +829,66 @@ static void Calib_PaperBase(void) {
 	calib_last_pos = pos;
 }
 
-/* 标定 software_max：往远离 home 方向细靠走（用标出的 move_base），撞限位后记录行程 */
+/* 标定 software_max：闭环驱动往远离 home 方向走，撞机械限位时闭环 PWM 飙高超阈值判定行程 */
 static void Calib_SwMax(void) {
-	/* 远离 home 方向（软件限位方向），方向如需反向请调 HOMING_DIR 前的符号 */
-	/* [修改] 用刚标出的 move_base + 余量，而非固定 HOMING_FINE_DUTY：
-	   move_base 未标定前用默认值可能起不来电机，导致 software_max 误标成 0 */
-	set_move_pwm_duty(-HOMING_DIR * ((int32_t) current_config.move_base + current_config.homing_fine));
 	int32_t pos = read_move_encoder_counter();
-	/* [修复] 整体超时：编码器噪声让 calib_stuck_ms 反复清零时，加总时长上限防卡死 */
+	/* [修复] 整体超时：加总时长上限防卡死 */
 	if (++calib_elapsed_ms >= CALIB_SWMAX_TIMEOUT_MS) {
 		USART_printf(&huart1, "[Calib] software_max timeout\n");
 		set_move_pwm_duty(0);
+		move_busy = 0;
 		calib_type = CALIB_NONE;
 		homing_request = 1;
 		return;
 	}
-	/* [调试] 每 100ms 打印一次位置（mm），看电机实际往哪走、走多远 */
+	/* [调试] 每 100ms 打印一次位置（mm）+ PWM，看电机实际往哪走、走多远、PWM 是否顶满 */
 	if ((calib_tick % 100) == 0) {
 		USART_printf(&huart1, "[Calib] swmax pos=");
 		print_mm_2f(pos);
 		USART_printf(&huart1, "mm max=");
 		print_mm_2f(calib_max_pos);
-		USART_printf(&huart1, "mm stuck=%u\n", (unsigned int) calib_stuck_ms);
+		USART_printf(&huart1, "mm pwm=%ld stuck=%u\n",
+				(long) move_pwm_current, (unsigned int) calib_stuck_ms);
 	}
+	/* 记录最远端（远离 home = 位置减小，负方向） */
 	if (pos < calib_max_pos) {
-		/* 远离 home = 位置减小（负方向），记录最远端（最小值） */
 		calib_max_pos = pos;
-		calib_stuck_ms = 0;
-	} else if (++calib_stuck_ms >= CALIB_STUCK_MS) {
-		/* 撞限位：software_max = |最远端| 的距离 - 余量 */
-		int32_t dist = (calib_max_pos < 0) ? -calib_max_pos : calib_max_pos;
-		float max_mm = Notes_ConvertPulsesToMM(dist);
-		int32_t sw = (int32_t) (max_mm * 100.0f) - (int32_t) current_config.calib_sw_margin;
-		if (sw < 0)
-			sw = 0;
-		/* [修复] 标定结果校验：sw 过小（<1mm）说明方向反/没起步/余量过大，
-		   保留旧值避免 software_max=0 让主轴被钳死 */
-		if (sw < 100) {
-			USART_printf(&huart1, "[Calib] software_max failed: too small (%ld.%02ld mm)\n",
-					(long) (sw / 100), (long) (sw % 100));
-		} else {
-			current_config.software_max = (uint16_t) sw;
-			Notes_SetSwMaxMM100((uint16_t) sw); /* [新增] 同步软件限位脉冲缓存 */
-			if (!calib_is_factory) current_config.calibrated = 1; /* [新增] 标记已标定 */
-			save_config_request = 1;
-			USART_printf(&huart1, "[Calib] software_max = %ld.%02ld mm\n",
-					(long) (sw / 100), (long) (sw % 100));
-		}
-		set_move_pwm_duty(0);
-		calib_type = CALIB_NONE;
-		homing_request = 1; /* 标定走到头了，回零 */
 	}
+	/* [修改] 撞限位判定：闭环输出 PWM 持续超阈值（电机被机械限位挡住，位置环误差持续大、PWM 顶满）。
+	   不再用「位置不变」判定——开环固定 PWM 可能因堵转/阻力中途停下被误判提前 STOP */
+	int32_t pwm = move_pwm_current;
+	if (pwm < 0)
+		pwm = -pwm;
+	if (pwm >= CALIB_SWMAX_PWM_THRESHOLD) {
+		if (++calib_stuck_ms >= CALIB_STUCK_MS) {
+			/* 撞限位：software_max = |最远端| 的距离 - 余量 */
+			int32_t dist = (calib_max_pos < 0) ? -calib_max_pos : calib_max_pos;
+			float max_mm = Notes_ConvertPulsesToMM(dist);
+			int32_t sw = (int32_t) (max_mm * 100.0f) - (int32_t) current_config.calib_sw_margin;
+			if (sw < 0)
+				sw = 0;
+			/* [修复] 标定结果校验：sw 过小（<1mm）说明方向反/没起步/余量过大，
+			   保留旧值避免 software_max=0 让主轴被钳死 */
+			if (sw < 100) {
+				USART_printf(&huart1, "[Calib] software_max failed: too small (%ld.%02ld mm)\n",
+						(long) (sw / 100), (long) (sw % 100));
+			} else {
+				current_config.software_max = (uint16_t) sw;
+				Notes_SetSwMaxMM100((uint16_t) sw); /* [新增] 同步软件限位脉冲缓存 */
+				if (!calib_is_factory) current_config.calibrated = 1; /* [新增] 标记已标定 */
+				save_config_request = 1;
+				USART_printf(&huart1, "[Calib] software_max = %ld.%02ld mm\n",
+						(long) (sw / 100), (long) (sw % 100));
+			}
+			set_move_pwm_duty(0);
+			move_busy = 0;
+			calib_type = CALIB_NONE;
+			homing_request = 1; /* 标定走到头了，回零 */
+		}
+	} else {
+		calib_stuck_ms = 0;
+	}
+	calib_last_pos = pos;
 }
 
 void Calibration_Task(void) {

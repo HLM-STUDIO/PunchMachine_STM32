@@ -15,6 +15,7 @@
 #include "main.h"
 
 volatile uint8_t homing_request = 0; /* [新增] 回零请求标志：由 M80/累计满N孔 置1，动作空闲时执行 */
+volatile uint8_t homing_no_recenter = 0; /* [新增] 本次回零完成后不回中(累计打孔数阈值回零用：打孔中途须回待打位置，非软件限位中点) */
 
 /* 内部静态变量 */
 static volatile homing_state_e homing_state = HOMING_IDLE;

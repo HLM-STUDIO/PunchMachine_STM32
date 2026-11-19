@@ -61,5 +61,6 @@ int Homing_Task(void);
 uint8_t Homing_IsActive(void); /* [新增] 返回 homing 是否正在进行中 */
 
 extern volatile uint8_t homing_request; /* [新增] 回零请求标志(1=请求，动作空闲时执行) */
+extern volatile uint8_t homing_no_recenter; /* [新增] 本次回零完成后不回中(1=不回中，累计打孔数阈值回零用) */
 
 #endif /* INC_HOMING_H_ */

@@ -411,7 +411,8 @@ void MCodeSimple_Service(void) {
 	if (homing_request && !Homing_IsActive() && move_busy == 0 && feed_busy == 0
 			&& punch_busy == 0 && !have_pending && !handle_enable) {
 		homing_request = 0;
-		homing_recenter = 1; /* [新增] 这次回零完成后回中（回到工作区中间，而非停在原点） */
+		homing_recenter = homing_no_recenter ? 0 : 1; /* [修改] 打孔中途阈值回零不回中(回待打位置)，其他场景(M80/标定)回中 */
+		homing_no_recenter = 0; /* 消费标志 */
 		Home_Start();
 	}
 
