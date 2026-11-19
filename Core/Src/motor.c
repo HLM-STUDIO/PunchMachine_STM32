@@ -442,6 +442,17 @@ void Move_Control_Reset(void) {
 	last_cnt_move = TIM2->CNT & 0xFFFF;
 }
 
+/* [autotune] 只清速度环积分/微分状态，不清编码器位置（进入振荡前用，保留当前位置）。
+   注意：Move_Control_Reset 会把 move_encoder_ext_count 清零，若在移动到工作区中点后调用，
+   会把位置 -sw_max/2 清回 0，导致振荡阶段 err=-sw_max/2 一直推负方向冲向软件限位。 */
+void Move_SpdIntegralReset(void) {
+	move_speed_meas = 0.0f;
+	move_spd_pi.integral = 0.0f;
+	move_pos_ctrl.prev_err = 0.0f;
+	move_pos_ctrl.prev_deriv = 0.0f;
+	last_cnt_move = TIM2->CNT & 0xFFFF;
+}
+
 /* ============================================================
  * Paper 复位（方案 A：同步 last_cnt_paper）
  * ============================================================ */

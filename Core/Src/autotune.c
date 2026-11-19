@@ -138,8 +138,9 @@ void Autotune_Service(void) {
 
 	case AT_MOVE:
 		if (move_busy == 0) {
-			/* 到位：进入振荡，清测量状态 */
-			Move_Control_Reset();   /* 清速度环积分 + 同步位置 */
+			/* 到位：进入振荡，清测量状态。只清积分/微分，保留当前位置（-sw_max/2），
+			   否则 Move_Control_Reset 会把位置清回 0，err=-sw_max/2 冲向软件限位 */
+			Move_SpdIntegralReset();
 			at_tick = 0;
 			at_err_prev = 0;
 			at_last_cross = 0;
@@ -191,11 +192,17 @@ void Autotune_Service(void) {
 		at_state = AT_DONE;
 		break;
 
-	case AT_DONE:
-		USART_printf(&huart1, "[Tune] OK: kp=%.0f kd=%.3f Tu=%lu ms\r\n",
-				at_kp, at_kd, (unsigned long) at_Tu_ms);
+	case AT_DONE: {
+		/* [修复] newlib-nano 无 printf_float，禁 %f（会打印空）。拆整数/小数打印 */
+		int32_t kp100 = (int32_t) (at_kp * 100.0f + 0.5f);
+		int32_t kd1000 = (int32_t) (at_kd * 1000.0f + 0.5f);
+		USART_printf(&huart1, "[Tune] OK: kp=%ld.%02ld kd=%ld.%03ld Tu=%lu ms\r\n",
+				(long) (kp100 / 100), (long) (kp100 % 100),
+				(long) (kd1000 / 1000), (long) (kd1000 % 1000),
+				(unsigned long) at_Tu_ms);
 		at_state = AT_IDLE;
 		break;
+	}
 
 	case AT_FAILED:
 		USART_printf(&huart1, "[Tune] FAILED\r\n");

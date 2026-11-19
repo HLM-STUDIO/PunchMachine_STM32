@@ -78,6 +78,7 @@ void Move_Control_Reset(void);
 float Move_Get_Speed(void);
 void Move_RelayDrive(float v_ref);   /* [autotune] 继电器驱动：速度环PI+死区补偿输出PWM，自整定振荡阶段用 */
 void Move_SetPosCtrl(float kp, float kd); /* [autotune] 应用位置环 PD 参数（自整定结果） */
+void Move_SpdIntegralReset(void);    /* [autotune] 只清速度环积分/微分状态，不清编码器位置（进入振荡前用，保留当前位置） */
 
 /* [新增] PID 参数开放接口（S51-S62） */
 enum {
