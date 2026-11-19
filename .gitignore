@@ -1,0 +1,17 @@
+# STM32CubeIDE 构建产物
+Release/
+Debug/
+
+# 编译中间/输出文件
+*.o
+*.d
+*.elf
+*.hex
+*.map
+*.list
+*.bin
+
+# 编辑器/系统
+*.swp
+.DS_Store
+Thumbs.db
