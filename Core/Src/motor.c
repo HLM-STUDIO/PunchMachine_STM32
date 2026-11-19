@@ -859,17 +859,11 @@ static void Calib_SwMax(void) {
 		USART_printf(&huart1, "mm pwm=%ld stuck=%u\n",
 				(long) move_pwm_current, (unsigned int) calib_stuck_ms);
 	}
-	/* 记录最远端（远离 home = 位置减小，负方向） */
+	/* 记录最远端（远离 home = 位置减小，负方向）；max 连续不变化判撞限位 */
 	if (pos < calib_max_pos) {
 		calib_max_pos = pos;
-	}
-	/* [修改] 撞限位判定：闭环输出 PWM 持续超阈值（电机被机械限位挡住，位置环误差持续大、PWM 顶满）。
-	   不再用「位置不变」判定——开环固定 PWM 可能因堵转/阻力中途停下被误判提前 STOP */
-	int32_t pwm = move_pwm_current;
-	if (pwm < 0)
-		pwm = -pwm;
-	if (pwm >= CALIB_SWMAX_PWM_THRESHOLD) {
-		if (++calib_stuck_ms >= CALIB_STUCK_MS) {
+		calib_stuck_ms = 0;
+	} else if (++calib_stuck_ms >= CALIB_STUCK_MS) {
 			/* 撞限位：software_max = |最远端| 的距离 - 余量 */
 			int32_t dist = (calib_max_pos < 0) ? -calib_max_pos : calib_max_pos;
 			float max_mm = Notes_ConvertPulsesToMM(dist);
@@ -893,9 +887,6 @@ static void Calib_SwMax(void) {
 			move_busy = 0;
 			calib_type = CALIB_NONE;
 			homing_request = 1; /* 标定走到头了，回零 */
-		}
-	} else {
-		calib_stuck_ms = 0;
 	}
 	calib_last_pos = pos;
 }
