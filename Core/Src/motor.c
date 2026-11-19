@@ -405,6 +405,15 @@ void Move_Control_Task(void) {
 		   目标越界时电机被驱动越限/顶 home，且 err 已满足但速度环仍出力、永不完成卡死） */
 		v_ref_last_move = Position_Loop(&move_pos_ctrl, target,
 				pos, MOVE_POS_LOOP_HZ);
+		/* [修改] 软件限位标定限速：目标设在限位外(-100000)时 err 巨大、v_ref 立即顶到 vmax，
+		   导致 PWM 第一周期就顶满、还没到限位就误判撞限位。限幅 v_ref 到慢速，正常行走 PWM 不顶满，
+		   只有真撞限位(电机被挡、速度环积分累积)时 PWM 才飙高超过阈值 */
+		if (calib_type == CALIB_SW_MAX) {
+			if (v_ref_last_move > CALIB_SWMAX_SPEED)
+				v_ref_last_move = CALIB_SWMAX_SPEED;
+			if (v_ref_last_move < -CALIB_SWMAX_SPEED)
+				v_ref_last_move = -CALIB_SWMAX_SPEED;
+		}
 	}
 
 	float u = Speed_PI_Update(&move_spd_pi, v_ref_last_move, move_speed_meas);

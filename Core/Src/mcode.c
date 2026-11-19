@@ -54,6 +54,8 @@ static const uint32_t OK_REPEAT_INTERVAL_MS = 1000; /* 重发间隔：1000 ms（
 
 /* [新增] 回零完成后是否回中（M80/累计满N孔触发的回零用；自检/标定的回零有各自的回中流程） */
 static volatile uint8_t homing_recenter = 0;
+/* [新增] 累计打孔数阈值回零：当前行 OK 延迟到 homing 完成后再回（避免 homing 期间上位机发下一行打断回零） */
+static volatile uint8_t pending_homing_ok = 0;
 
 /* ---------------- helper functions ---------------- */
 
@@ -421,6 +423,16 @@ void MCodeSimple_Service(void) {
 		homing_recenter = 0;
 	}
 
+	/* [修改] 累计打孔数阈值回零：homing 失败也回延迟的 OK，避免上位机卡住等 ACK */
+	if (pending_homing_ok && Home_IsFailed()) {
+		pending_homing_ok = 0;
+		sendOK_internal();
+		if (in_mcode) {
+			ok_repeat_active = 1;
+			last_ok_ms = HAL_GetTick();
+		}
+	}
+
 	/* [新增] 回零完成后回中：homing_recenter 置位时，Home_IsDone() 后移动到 software_max/2 工作区中间 */
 	if (homing_recenter && Home_IsDone()) {
 		homing_recenter = 0;
@@ -428,6 +440,16 @@ void MCodeSimple_Service(void) {
 		int32_t mid_pulses = Notes_ConvertMMToPulses(mid_mm);
 		move_target_position = -mid_pulses;
 		move_busy = 1;
+	}
+
+	/* [修改] 累计打孔数阈值回零：homing 完成后回延迟的 OK（当前行真正完成，上位机再发下一行） */
+	if (pending_homing_ok && Home_IsDone()) {
+		pending_homing_ok = 0;
+		sendOK_internal();
+		if (in_mcode) {
+			ok_repeat_active = 1;
+			last_ok_ms = HAL_GetTick();
+		}
 	}
 
 	/* 先处理 OK 重发逻辑（如果激活并仍在 mcode） */
@@ -528,6 +550,9 @@ void MCodeSimple_Service(void) {
 				if (pending_no_ok_on_complete) {
 					if (cb_send_ok)
 						FileIO_NotifyLineDoneOnly();
+				} else if (homing_no_recenter) {
+					/* [修改] 累计打孔数阈值回零：OK 延迟到 homing 完成后再回 */
+					pending_homing_ok = 1;
 				} else {
 					sendOK_internal();
 					/* 如果仍在 mcode，启用 OK 重发，直到主机下一次发数据 */
@@ -561,6 +586,9 @@ void MCodeSimple_Service(void) {
 				if (pending_no_ok_on_complete) {
 					if (cb_send_ok)
 						FileIO_NotifyLineDoneOnly();
+				} else if (homing_no_recenter) {
+					/* [修改] 累计打孔数阈值回零：OK 延迟到 homing 完成后再回 */
+					pending_homing_ok = 1;
 				} else {
 					sendOK_internal();
 					if (in_mcode) {
