@@ -417,6 +417,13 @@ void Move_Control_Task(void) {
 	}
 
 	float u = Speed_PI_Update(&move_spd_pi, v_ref_last_move, move_speed_meas);
+	/* [修改] 软件限位标定：限制 PWM 到 ±2000，避免撞限位后全功率(3600)堵转过热 */
+	if (calib_type == CALIB_SW_MAX) {
+		if (u > CALIB_SWMAX_PWM_LIMIT)
+			u = CALIB_SWMAX_PWM_LIMIT;
+		if (u < -CALIB_SWMAX_PWM_LIMIT)
+			u = -CALIB_SWMAX_PWM_LIMIT;
+	}
 	set_move_pwm_duty(Apply_DeadZone(u, (int32_t) current_config.move_base));
 }
 

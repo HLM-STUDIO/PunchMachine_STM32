@@ -32,6 +32,7 @@
 #define CALIB_STUCK_MS        500   /* software_max 撞限位判定：编码器连续多少 ms 不变 */
 #define CALIB_SWMAX_PWM_THRESHOLD 2700 /* software_max 闭环标定：闭环输出 PWM 超此阈值(75% PWM_MAX)判撞限位 */
 #define CALIB_SWMAX_SPEED       500  /* software_max 闭环标定：限速慢行(pulse/s)，避免目标无限远致 PWM 立即顶满误判撞限位 */
+#define CALIB_SWMAX_PWM_LIMIT   2000 /* software_max 标定：PWM 上限(±2000)，撞限位堵转不全功率(3600)防过热 */
 /* software_max 标定余量已改为运行期配置 current_config.calib_sw_margin（S86 设置，mm×100） */
 #define CALIB_MOVE_MIN_PULSES 5     /* move_base 标定：编码器至少动这么多脉冲才算「电机启动」，过滤 ±1 噪声 */
 #define POS_HOLD_ZONE  0        // [修改] 位置死区改回 0：打孔时已锁死 counter，移动到位要求精确对齐
