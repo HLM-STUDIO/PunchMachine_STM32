@@ -65,7 +65,7 @@ static pi_ctrl_t paper_spd_pi = { .kp = 1.2f, .ki = 0.02f, .integral = 0.0f,
 /* ============================================================
  * PWM 输出（move / paper）
  * ============================================================ */
-static int32_t move_pwm_current = 0; /* [新增] 当前 move PWM 输出（闭环标定 software_max 判撞限位用） */
+static int32_t move_pwm_current = 0; /* 当前 move PWM 输出（software_max 标定调试打印用） */
 
 void set_move_pwm_duty(int32_t duty) {
 	if (duty > PWM_MAX)
@@ -317,7 +317,6 @@ void Motor_LoadPIDFromConfig(void) {
 static uint8_t calib_type = CALIB_NONE;   /* 当前标定类型 */
 static uint32_t calib_tick = 0;           /* 标定计时（ms） */
 static int32_t calib_pwm = 0;             /* 标定 base 时当前 PWM */
-static int32_t calib_last_pos = 0;        /* 上次编码器位置（检测电机动） */
 static int32_t calib_max_pos = 0;         /* 标定 sw_max 时最大位置 */
 static uint32_t calib_stuck_ms = 0;       /* 撞限位判定（编码器不变计数） */
 static uint32_t calib_elapsed_ms = 0;     /* [修复] sw_max 标定总时长（防编码器噪声反复清零 stuck 卡死） */
@@ -714,25 +713,20 @@ void Calibration_Start(uint8_t type) {
 	calib_type = type;
 	calib_tick = 0;
 	calib_pwm = 0;
-	calib_last_pos = 0;
 	calib_max_pos = 0;
 	calib_stuck_ms = 0;
 	calib_elapsed_ms = 0;
 
 	switch (type) {
 	case CALIB_MOVE_BASE:
-		calib_last_pos = read_move_encoder_counter();
-		calib_max_pos = calib_last_pos;  /* [修改] 记录标定起始位置，用于最小移动量判定 */
+		calib_max_pos = read_move_encoder_counter();  /* 记录标定起始位置，用于最小移动量判定 */
 		break;
 	case CALIB_PAPER_BASE:
-		calib_last_pos = read_paper_encoder_counter();
-		calib_max_pos = calib_last_pos;  /* [修复] 记录 paper 标定起始位置，用于最小移动量判定 */
+		calib_max_pos = read_paper_encoder_counter();  /* 记录 paper 标定起始位置，用于最小移动量判定 */
 		break;
 	case CALIB_SW_MAX:
 		calib_max_pos = read_move_encoder_counter();
-		calib_last_pos = calib_max_pos;
-		/* [修改] 闭环标定：位置环目标设在限位方向更远处（-100000 脉冲，超出任何合理行程），
-		   让闭环推电机往机械限位走；撞限位时闭环 PWM 飙高由 Calib_SwMax 判超阈值 */
+		/* 闭环标定：位置环目标设在限位方向更远处（-100000 脉冲，超出任何合理行程），让闭环推电机往机械限位走 */
 		move_target_position = calib_max_pos - 100000;
 		move_busy = 1;
 		break;
@@ -800,7 +794,6 @@ static void Calib_MoveBase(void) {
 		calib_type = CALIB_NONE;
 		homing_request = 1;
 	}
-	calib_last_pos = pos;
 }
 
 /* 标定 paper_base：同 move */
@@ -813,8 +806,7 @@ static void Calib_PaperBase(void) {
 		}
 	}
 	int32_t pos = read_paper_encoder_counter();
-	/* [修复] 用相对标定起始位置的偏离量判定「电机启动」，过滤 paper 霍尔 ±1 噪声
-	   （原 pos != calib_last_pos 会因噪声误标 paper_base） */
+	/* 用相对标定起始位置的偏离量判定「电机启动」，过滤 paper 霍尔 ±1 噪声 */
 	int32_t moved = pos - calib_max_pos;
 	if (moved < 0)
 		moved = -moved;
@@ -842,10 +834,9 @@ static void Calib_PaperBase(void) {
 		paper_target_position = 0;
 		calib_type = CALIB_NONE;
 	}
-	calib_last_pos = pos;
 }
 
-/* 标定 software_max：闭环驱动往远离 home 方向走，撞机械限位时闭环 PWM 飙高超阈值判定行程 */
+/* 标定 software_max：闭环驱动往远离 home 方向走，max(最远端)连续不变化判撞限位 */
 static void Calib_SwMax(void) {
 	int32_t pos = read_move_encoder_counter();
 	/* [修复] 整体超时：加总时长上限防卡死 */
@@ -895,7 +886,6 @@ static void Calib_SwMax(void) {
 			calib_type = CALIB_NONE;
 			homing_request = 1; /* 标定走到头了，回零 */
 	}
-	calib_last_pos = pos;
 }
 
 void Calibration_Task(void) {
