@@ -43,7 +43,7 @@ SystemConfig_t default_config = { .magic = 0xA5A5, .version = CONFIG_VERSION, .m
 		.move_total = 0, .checksum = 0, .home_per_points = 500, .encoder_filter = 15, ._pad2 = 0,
 	.move_kp = 3000, .move_kd = 100, .move_spd_kp = 150, .move_spd_ki = 30,
 	.paper_kp = 4000, .paper_kd = 150, .paper_spd_kp = 120, .paper_spd_ki = 20,
-	.paper_dead_band = 2, .homing_coarse = 640, .homing_fine = 60, .homing_backoff = 140 };
+	.paper_dead_band = 2, .homing_coarse = 640, .homing_fine = 100, .homing_backoff = 200 };
 
 typedef enum {
 	CMD_OK = 0, CMD_ERR_PARAM, CMD_ERR_UNSUPPORTED, CMD_ERR_INTERNAL
@@ -395,8 +395,8 @@ void system_command(int S_id, uint8_t has_val, int32_t val) {
 		for (uint8_t i = 0; i < 9; i++)
 			need_save |= set_pid_param(i, pid_def[i]);
 		current_config.homing_coarse = 640;
-		current_config.homing_fine = 60;
-		current_config.homing_backoff = 140;
+		current_config.homing_fine = 100;
+		current_config.homing_backoff = 200;
 		if (pid_save_enable)
 			need_save = 1;
 		break;
@@ -721,8 +721,8 @@ int MigrateConfig(SystemConfig_t *cfg) {
 		cfg->paper_spd_ki = 20;
 		cfg->paper_dead_band = 2;
 		cfg->homing_coarse = 640;
-		cfg->homing_fine = 60;
-		cfg->homing_backoff = 140;
+		cfg->homing_fine = 100;
+		cfg->homing_backoff = 200;
 		from = 110;
 	}
 
@@ -772,9 +772,9 @@ int MigrateConfig(SystemConfig_t *cfg) {
 	if (cfg->homing_coarse < 300 || cfg->homing_coarse > 2000)
 		cfg->homing_coarse = 640;
 	if (cfg->homing_fine < 30 || cfg->homing_fine > 500)
-		cfg->homing_fine = 60;
+		cfg->homing_fine = 100;
 	if (cfg->homing_backoff < 50 || cfg->homing_backoff > 1000)
-		cfg->homing_backoff = 140;
+		cfg->homing_backoff = 200;
 
 	cfg->version = CONFIG_VERSION;
 	cfg->checksum = CalculateChecksum(cfg);

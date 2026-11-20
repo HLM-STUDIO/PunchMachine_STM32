@@ -52,8 +52,8 @@ typedef struct {
     uint16_t paper_spd_ki;   // [新增] paper 速度环 I（×1000，20=0.020），S58
     uint16_t paper_dead_band;// [新增] paper 到位容忍（脉冲，默认 2），S59
     uint16_t homing_coarse;  // [新增] 回零粗靠 PWM 加值（默认 640），S60
-    uint16_t homing_fine;    // [新增] 回零细靠 PWM 加值（默认 60，勿<30 堵转），S61
-    uint16_t homing_backoff; // [新增] 回零退开 PWM 加值（默认 140），S62
+    uint16_t homing_fine;    // 回零细靠 PWM 加值（默认 100，勿<30 堵转），S61
+    uint16_t homing_backoff; // 回零退开 PWM 加值（默认 200），S62
 } SystemConfig_t;
 
 

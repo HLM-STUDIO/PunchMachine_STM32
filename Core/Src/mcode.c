@@ -442,8 +442,10 @@ void MCodeSimple_Service(void) {
 		move_busy = 1;
 	}
 
-	/* [修改] 累计打孔数阈值回零：homing 完成后回延迟的 OK（当前行真正完成，上位机再发下一行） */
-	if (pending_homing_ok && Home_IsDone()) {
+	/* [修改] 累计打孔数阈值回零：homing 完成后回延迟的 OK（当前行真正完成，上位机再发下一行）。
+	   必须等 notes_recalc_request 被主循环消费(Notes_Init 重算位置表)后再回 OK，否则上位机立即发
+	   下一行时 Notes_MoveToIndex 因重算未完成而拒绝移动，电机用旧位置打孔错位 */
+	if (pending_homing_ok && Home_IsDone() && !notes_recalc_request) {
 		pending_homing_ok = 0;
 		sendOK_internal();
 		if (in_mcode) {
